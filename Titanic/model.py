@@ -10,6 +10,7 @@ from sklearn.ensemble import GradientBoostingClassifier
 from sklearn import cross_validation
 from sklearn.cross_validation import KFold
 from sklearn.feature_selection import SelectKBest, f_classif # 引入feature_selection观察每一个特征的重要程度
+from sklearn import preprocessing
 
 import matplotlib.pyplot as plt
 from keras.models import Sequential
@@ -19,8 +20,8 @@ from keras.optimizers import SGD, Adam
 from keras.utils import np_utils
 
 #-----数据处理
-def dataProcessing():
-    titanic = pandas.read_csv('train.csv')
+def dataProcessing(data):
+    titanic = pandas.read_csv(data)
     # print titanic.describe()
     
     #------处理Age&Sex
@@ -38,12 +39,31 @@ def dataProcessing():
     titanic['NameLength'] = titanic['Name'].apply(lambda x : len(x)) # 名字长度
     titles = titanic['Name'].apply(get_title)
     # print pandas.value_counts(titles)
-    title_mapping = {"Mr":1, "Miss":2, "Mrs":3, "Master":4, "Dr":5, "Rev":6, "Col":7, "Major":8, "Mlle":9, "Countess":10, "Ms":11, "Lady":12, "Jonkheer":13, "Don":14, "Mme":15, "Capt":16, "Sir":17}
+    # title_mapping = {"Mr":1, "Miss":2, "Mrs":3, "Master":4, "Dr":5, "Rev":6, "Col":7, "Major":8, "Mlle":9, "Countess":10, "Ms":11, "Lady":12, "Jonkheer":13, "Don":14, "Mme":15, "Capt":16, "Sir":17, "Dona":18}
+    title_mapping = {"Mr":1, "Miss":2, "Mrs":3, "Master":4, "Dr":5, "Rev":6, "Col":7, "Major":8, "Mlle":2, "Countess":10, "Ms":2, "Lady":2, "Jonkheer":13, "Don":14, "Mme":15, "Capt":16, "Sir":17, "Dona":2}
     for k,v in title_mapping.items():
         titles[titles == k] = v
         # print (pandas.value_counts(titles))
-    titanic["titles"] = titles # 添加title             
-    return titanic
+    titanic["titles"] = titles # 添加title 
+    
+    #-----*****
+    predictors = ['Pclass', 'Sex', 'Age', 'SibSp', 'Parch', 'Fare', 'Embarked', 'Familysize', 'NameLength', 'titles'] # 用到的特征
+    data_x = titanic[predictors]
+    data_x = data_x.fillna(0)
+    data_x = data_x.values # train时数据应为np.array格式，而非pd.dataframe格式
+
+    #------特征归一化
+    min_max_scaler = preprocessing.MinMaxScaler()
+    data_x = min_max_scaler.fit_transform(data_x)
+    print titanic.keys()
+    data_y = []
+    if 'Survived' in titanic.keys():
+        label = titanic['Survived']
+        data_y = np.zeros((len(label),2))
+        data_y[:,0] = label
+        data_y[:,1] = np.ones((len(label))) - label
+
+    return titanic, data_x, data_y, predictors
 
 def get_title(name):
     title_reserch = re.search('([A-Za-z]+)\.', name)
@@ -53,6 +73,7 @@ def get_title(name):
 
 def dataVisualization(titanic): 
     predictors = ['Pclass', 'Sex', 'Age', 'SibSp', 'Parch', 'Fare', 'Embarked', 'Familysize', 'NameLength', 'titles'] # 用到的特征
+
     # print len(predictors)
     selector = SelectKBest(f_classif, k=5)
     selector.fit(titanic[predictors], titanic['Survived'])
@@ -117,33 +138,40 @@ def boostingClassifier(predictors,titanic):
     accuracy = sum(predictions[predictions == titanic['Survived']])/ len(predictions)
     print accuracy
 
-def deepLearning(predictors, titanic):
-    train_x = titanic[predictors]
-    label = titanic['Survived']
-    train_y = np.zeros((2,len(label)))
-    train_y[0,:] = label
-    train_y[1,:] = np.ones((len(label))) - label
+def deepLearning(predictors, train_x, train_y, test_x, test_y):
     model = Sequential()
-    model.add(Dense(input_dim=len(predictors), units=100, activation='sigmoid'))
-    model.add(Dense(units=100,activation='sigmoid'))
+    model.add(Dense(input_dim=len(predictors), units=32, activation='relu'))
+    model.add(Dense(units=16,activation='relu'))
+    model.add(Dense(units=8,activation='relu'))
     model.add(Dense(units=2, activation='softmax'))
-    model.compile(loss='mse', optimizer=SGD(lr=0.1),metrics=['accuracy'])
-    model.fit(train_x, train_y, batch_size=100, epochs=20)
-    train_results = model.evaluate(train_x, train_y, batch_size=100)
-    print 'Deep Learning(Training):', train_results
+    # model.compile(loss='categorical_crossentropy', optimizer='adam', metrics=['accuracy'])
+    model.compile(loss='mse', optimizer='adam', metrics=['accuracy'])
+    model.fit(train_x, train_y, batch_size=10, epochs=20)
+    train_results = model.evaluate(train_x, train_y)
+    test_results = model.predict(test_x, batch_size=10)
+
+    test_results[test_results >.5] = 1
+    test_results[test_results <=.5] = 0
+    
+    print '\nDeep Learning(Training):', train_results
+    print '\nDeep Learning(Testing):', test_results[:,0]
+    return test_results[:,0]
     
 
 def main():
     print 'aloha'
-    predictors = ['Pclass', 'Sex', 'Age', 'SibSp', 'Parch', 'Fare', 'Embarked'] # 用到的特征
-    titanic = dataProcessing()
-    # print titanic.shape
-    dataVisualization(titanic)
-    linearRegression(predictors, titanic)
-    logisticRegression(predictors, titanic)
-    randomForestClassifier(predictors, titanic)
-    deepLearning(predictors, titanic)
-
+    titanic, train_x, train_y, predictors  = dataProcessing('train.csv')
+    titanic_test, test_x, test_y, predictors = dataProcessing('test.csv')
+    # dataVisualization(titanic)
+    # linearRegression(predictors, titanic)
+    # logisticRegression(predictors, titanic)
+    # randomForestClassifier(predictors, titanic)
+    print titanic_test.shape
+    predict = np.zeros((418,2),int)
+    predict[:,1] = deepLearning(predictors, train_x, train_y, test_x, test_y)
+    predict[:,0] = titanic_test['PassengerId']
+    np.savetxt('predict.csv', predict, fmt="%d", delimiter = ',') 
+    #print predict
 if __name__ == '__main__':
     main()
     print 'aloha'
